@@ -71,6 +71,7 @@ in vec3 vLookat;
 
 uniform sampler2D uSampler;
 uniform sampler2D uSampler2;
+uniform sampler2D uSamplerBump;
 uniform vec3 vLightPos;
 uniform vec3 vLightPos2;
 
@@ -95,22 +96,32 @@ void main() {
   //Proper solution here would be to use a model that dobles up on vertices. This is usually done in modeling
   //software for both texture coords and model vertices and not dynamically mapped in a shader.
   
+  //WE NEED TO BUMP MAP HERE BEFORE vNormal is used AT ALL since we will be modifying it
   vec3 normalIn = normalize(vNormal);
+  vec3 Pt = vec3(0.0, 1.0, 0.0); // Can use up vector which is y-axis as Pt
+  vec3 Ps = normalize(cross(-normalIn, Pt));
+  vec3 sampleS = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s+(1.0/512.0), vTexCoord.t),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s-(1.0/512.0), vTexCoord.t),0.0));
+  vec3 sampleT = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t+(1.0/512.0)),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t-(1.0/512.0)),0.0));
+  sampleS = Ps*(sampleS.x*0.05+sampleS.y*0.1+sampleS.z*0.01);
+  sampleT = normalize(cross(normalIn, Ps))*(sampleT.x*0.025+sampleT.y*0.1+sampleT.z*0.01);
+  normalIn = normalize(normalIn+sampleS+sampleT);
+  
+  //Here we will get the correct mapping from the sphere map texture using modified normals
   vTexCoord.s = (normalIn.x+1.0)/2.0;
   vTexCoord.t = (normalIn.y+1.0)/2.0;
   
   vec3 stadium = vec3(texture(uSampler2, vTexCoord));
-  float comp = clamp(dot(normalize(vLightPos), normalize(vNormal)),0.0,1.0);
+  float comp = clamp(dot(normalize(vLightPos), normalIn),0.0,1.0);
   vec3 lambDiff1 = vec3(comp, comp, comp);
-  comp = clamp(dot(normalize(vLightPos2), normalize(vNormal)),0.0,1.0);
+  comp = clamp(dot(normalize(vLightPos2), normalIn),0.0,1.0);
   vec3 lambDiff2 = vec3(comp, comp, comp);
-  comp = pow(clamp(dot(reflect(-normalize(vLightPos),normalize(vNormal)),normalize(vLookat)),0.0,1.0),PHONGEXP);
+  comp = pow(clamp(dot(reflect(-normalize(vLightPos),normalIn),normalize(vLookat)),0.0,1.0),PHONGEXP);
   vec3 phongSpecL1 = vec3(comp, comp, comp);
-  comp = pow(clamp(dot(reflect(-normalize(vLightPos2),normalize(vNormal)),normalize(vLookat)),0.0,1.0),PHONGEXP);
+  comp = pow(clamp(dot(reflect(-normalize(vLightPos2),normalIn),normalize(vLookat)),0.0,1.0),PHONGEXP);
   vec3 phongSpecL2 = vec3(comp, comp, comp);
   
   
-  vec3 c = (0.70*illinois + 0.3*stadium)*(0.5*(lambDiff1+lambDiff2)+0.1)+0.5*phongSpecL1+0.5*phongSpecL2;
+  vec3 c = (0.7*illinois + 0.3*stadium)*(0.5*(lambDiff1+lambDiff2)+0.1)+0.5*phongSpecL1+0.5*phongSpecL2;
 
   outColor = vec4(c,1.0);
 }
@@ -240,6 +251,34 @@ function initwebgl() {
   });
 
   //
+  // set up bump map texture and sampler
+  //
+
+  textureBump = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, textureBump);
+
+  var samplerBump = gl.createSampler();
+  gl.bindSampler(2, samplerBump);
+
+  //
+  // load texture image using webgl2fundamentals boilerplate
+  // initially creates just a 1x1 blue pixel as a placeholder
+  // replaced by actual texture image once loaded
+  //
+
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA,
+                gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
+
+  var imageBump = new Image();
+  imageBump.src = "bump512.png";
+
+  imageBump.addEventListener("load", function() {
+    gl.bindTexture(gl.TEXTURE_2D, textureBump);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, imageBump);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  });
+
+  //
   // set up transformation matrices
   //
 
@@ -286,7 +325,8 @@ function loadshaders(vertexShaderSource,fragmentShaderSource) {
   normal_uniform = gl.getUniformLocation(shaderProgram, "uNormalMatrix"); 
   projection_uniform = gl.getUniformLocation(shaderProgram, "uProjectionMatrix"); 
   sampler_uniform = gl.getUniformLocation(shaderProgram, "uSampler"); 
-  sampler2_uniform = gl.getUniformLocation(shaderProgram, "uSampler2"); 
+  sampler2_uniform = gl.getUniformLocation(shaderProgram, "uSampler2");
+  samplerBump_uniform = gl.getUniformLocation(shaderProgram, "uSamplerBump"); 
   light1_uniform = gl.getUniformLocation(shaderProgram, "vLightPos"); 
   light2_uniform = gl.getUniformLocation(shaderProgram, "vLightPos2"); 
 }
@@ -323,6 +363,7 @@ function draw(time) {
 
   gl.uniform1i(sampler_uniform,0);
   gl.uniform1i(sampler2_uniform,1);
+  gl.uniform1i(samplerBump_uniform,2);
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -330,6 +371,8 @@ function draw(time) {
   //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, texture2);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, textureBump);
 
   gl.bindVertexArray(teapot_vao);
   gl.drawElements(gl.TRIANGLES,
