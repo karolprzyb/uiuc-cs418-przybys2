@@ -85,11 +85,19 @@ void main() {
   vec2 vTexCoord;
   float theta = (-pi/2.0)+atan(vTexInputs.x,vTexInputs.z);
   vTexCoord.s = theta/(2.0*pi);
-  vTexCoord.s = vTexCoord.s < 0.0 ? 1.0+vTexCoord.s:vTexCoord.s;
+  vTexCoord.s = vTexCoord.s < 0.0 ? 1.0+vTexCoord.s:vTexCoord.s; // Shift discontinuity to spout of teapot
+  //vTexCoord.s = vTexCoord.s > 1.0 ? 1.0:vTexCoord.s;
   vTexCoord.t = 1.8*vTexInputs.y+0.6;
 
-  vec3 illinois = vec3(textureLod(uSampler, vTexCoord,0.0)); //Forcing LOD fixes thin line discontinuity on model
-  illinois = vec3(texture(uSampler, vTexCoord)); //PROPER MIPMAP BUT BROKEN DUE TO DISCONTINUITY (Thin line on model)
+  vec3 illinois;
+  //illinois = vec3(textureLod(uSampler, vTexCoord,0.0)); //Forcing LOD fixes thin line discontinuity on model
+  illinois = vec3(texture(uSampler, vTexCoord)); //PROPER MIPMAP BUT ARTIFACT DUE TO DISCONTINUITY (Thin line on model)
+  //Proper solution here would be to use a model that dobles up on vertices. This is usually done in modeling
+  //software for both texture coords and model vertices and not dynamically mapped in a shader.
+  
+  vec3 normalIn = normalize(vNormal);
+  vTexCoord.s = (normalIn.x+1.0)/2.0;
+  vTexCoord.t = (normalIn.y+1.0)/2.0;
   
   vec3 stadium = vec3(texture(uSampler2, vTexCoord));
   float comp = clamp(dot(normalize(vLightPos), normalize(vNormal)),0.0,1.0);
@@ -102,7 +110,7 @@ void main() {
   vec3 phongSpecL2 = vec3(comp, comp, comp);
   
   
-  vec3 c = (0.5*illinois + 0.0*stadium)*(0.0*(lambDiff1+lambDiff2)+1.0)+0.0*phongSpecL1+0.0*phongSpecL2;
+  vec3 c = (0.70*illinois + 0.3*stadium)*(0.5*(lambDiff1+lambDiff2)+0.1)+0.5*phongSpecL1+0.5*phongSpecL2;
 
   outColor = vec4(c,1.0);
 }
@@ -295,8 +303,12 @@ function draw(time) {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   modelview = glMatrix.mat4.create();
-  glMatrix.mat4.translate(modelview,modelview,[0.0, 0.0, -2.0]);
+  
+  glMatrix.mat4.translate(modelview,modelview,[0.0, 0.0, -3.0]);
+  glMatrix.mat4.rotateX(modelview,modelview, 0.15);
   glMatrix.mat4.rotateY(modelview,modelview, time*0.001);
+
+  //glMatrix.mat4.rotateY
 
   normalmatrix = glMatrix.mat3.create();
   glMatrix.mat3.normalFromMat4(normalmatrix,modelview);
@@ -315,7 +327,7 @@ function draw(time) {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, texture2);
 
