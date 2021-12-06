@@ -102,8 +102,12 @@ void main() {
   vec3 Ps = normalize(cross(-normalIn, Pt));
   vec3 sampleS = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s+(1.0/512.0), vTexCoord.t),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s-(1.0/512.0), vTexCoord.t),0.0));
   vec3 sampleT = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t+(1.0/512.0)),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t-(1.0/512.0)),0.0));
-  sampleS = Ps*(sampleS.x*0.05+sampleS.y*0.1+sampleS.z*0.01);
-  sampleT = normalize(cross(normalIn, Ps))*(sampleT.x*0.025+sampleT.y*0.1+sampleT.z*0.01);
+  #define G_SCALE 0.5
+  #define R_SCALE G_SCALE/2.0
+  #define B_SCALE R_SCALE/4.0
+  
+  sampleS = Ps*(sampleS.x*R_SCALE+sampleS.y*G_SCALE+sampleS.z*B_SCALE);
+  sampleT = normalize(cross(normalIn, Ps))*(sampleT.x*R_SCALE+sampleT.y*G_SCALE+sampleT.z*B_SCALE);
   normalIn = normalize(normalIn+sampleS+sampleT);
   
   //Here we will get the correct mapping from the sphere map texture using modified normals
