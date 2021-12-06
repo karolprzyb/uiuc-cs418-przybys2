@@ -5,6 +5,8 @@
 
 <script src="gl-matrix-min.js"></script>
 
+<script src="floor_model.js"></script>
+
 <script>
 var gl;
 var shaderProgram;
@@ -19,6 +21,22 @@ var light2_uniform;
 var teapot_vao;
 var vert_pos_attr;
 var vert_normal_attr;
+var renderPotBool_uniform;
+
+var shadowShaderProgram;
+var modelviewSh_uniform;
+var normalSh_uniform;
+var projectionSh_uniform;
+//var texture, texture2;
+//var sampler_uniform;
+//var sampler2_uniform;
+var light1sh_uniform;
+var light2sh_uniform;
+//var teapot_vao;
+var vert_pos_attrSh;
+var vert_normal_attrSh;
+
+var floor_vao;
 
 //
 // a default vertex shader implemented as a backquoted string variable
@@ -74,6 +92,7 @@ uniform sampler2D uSampler2;
 uniform sampler2D uSamplerBump;
 uniform vec3 vLightPos;
 uniform vec3 vLightPos2;
+uniform bool renderPot;
 
 out vec4 outColor;
 
@@ -102,6 +121,125 @@ void main() {
   vec3 Ps = normalize(cross(-normalIn, Pt));
   vec3 sampleS = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s+(1.0/512.0), vTexCoord.t),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s-(1.0/512.0), vTexCoord.t),0.0));
   vec3 sampleT = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t+(1.0/512.0)),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t-(1.0/512.0)),0.0));
+  
+  #define G_SCALE 0.5
+  #define R_SCALE G_SCALE/2.0
+  #define B_SCALE R_SCALE/4.0
+  
+  sampleS = Ps*(sampleS.x*R_SCALE+sampleS.y*G_SCALE+sampleS.z*B_SCALE);
+  sampleT = normalize(cross(normalIn, Ps))*(sampleT.x*R_SCALE+sampleT.y*G_SCALE+sampleT.z*B_SCALE);
+  normalIn = normalize(normalIn+sampleS+sampleT);
+  
+  // In order to render the floor with the same shader set the normals back if not rendering teapot w bump mapping
+  normalIn = renderPot ? normalIn : normalize(vNormal);
+  
+  //Here we will get the correct mapping from the sphere map texture using modified normals
+  vTexCoord.s = (normalIn.x+1.0)/2.0;
+  vTexCoord.t = (normalIn.y+1.0)/2.0;
+  
+  vec3 stadium = vec3(texture(uSampler2, vTexCoord));
+  float comp = clamp(dot(normalize(vLightPos), normalIn),0.0,1.0);
+  vec3 lambDiff1 = vec3(comp, comp, comp);
+  comp = clamp(dot(normalize(vLightPos2), normalIn),0.0,1.0);
+  vec3 lambDiff2 = vec3(comp, comp, comp);
+  comp = pow(clamp(dot(reflect(-normalize(vLightPos),normalIn),normalize(vLookat)),0.0,1.0),PHONGEXP);
+  vec3 phongSpecL1 = vec3(comp, comp, comp);
+  comp = pow(clamp(dot(reflect(-normalize(vLightPos2),normalIn),normalize(vLookat)),0.0,1.0),PHONGEXP);
+  vec3 phongSpecL2 = vec3(comp, comp, comp);
+  
+  vec3 floorC1 = vec3(72.0/255.0,19.0/255.0,255.0/255.0);
+  vec3 floorC2 = vec3(219.0/255.0,104.0/255.0,55.0/255.0);
+  float xMod = mod((vTexInputs.x / 0.25), 2.0);
+  float zMod = mod((vTexInputs.z / 0.25), 2.0);
+  vec3 floorColor = (xMod >= 0.0 && xMod < 1.0) ^^ (zMod >= 0.0 && zMod < 1.0)? floorC1 : floorC2;
+  
+  vec3 c = ((0.7*illinois + 0.3*stadium)*float(renderPot)+float(!renderPot)*(floorColor))*(0.5*(lambDiff1+lambDiff2)+0.15)+0.5*phongSpecL1+0.5*phongSpecL2;
+
+
+  outColor = vec4(c,1.0);
+  
+}
+`;
+
+var vsSh = `#version 300 es
+
+//#define pi 3.1415926535
+
+in vec3 aVertexPosition;
+in vec3 aVertexNormal;
+in vec2 aTexCoord;
+
+uniform mat4 uModelViewMatrix;
+uniform mat3 uNormalMatrix;
+uniform mat4 uProjectionMatrix;
+
+out vec3 vNormal;
+out vec3 vLookat;
+out vec3 vTexInputs;
+
+void main() {
+
+  //float angle = (pi/2.0)+atan(aVertexPosition.x,aVertexPosition.z);
+  //vTexCoord.s = ((pi)+atan(aVertexPosition.x,aVertexPosition.z))/(2.0*pi);
+  //vTexCoord.t = 1.8*aVertexPosition.y+0.6;
+  
+  vec4 p = uModelViewMatrix*vec4(aVertexPosition, 1.0);
+  vNormal = normalize(uNormalMatrix*aVertexNormal);
+  vLookat = normalize(-(uModelViewMatrix*vec4(aVertexPosition, 1.0)).xyz);
+  
+  vTexInputs = aVertexPosition;
+  gl_Position = uProjectionMatrix*p;
+}
+`;
+
+//
+// a default fragment shader implemented as a backquoted string variable
+//
+
+var fsSh = `#version 300 es
+
+#define PHONGEXP 10.0
+#define pi 3.1415926535
+precision mediump float;
+    
+in vec3 vNormal;
+in vec3 vTexInputs;
+in vec3 vLookat;
+
+uniform sampler2D uSampler;
+uniform sampler2D uSampler2;
+uniform sampler2D uSamplerBump;
+uniform vec3 vLightPos;
+uniform vec3 vLightPos2;
+
+out vec4 outColor;
+
+float atan2(float y, float x){
+	float thet = y >= 0.0 && x>=0.0?pi:atan(y,x);
+	return thet;
+}
+
+void main() {
+  vec2 vTexCoord;
+  float theta = (-pi/2.0)+atan(vTexInputs.x,vTexInputs.z);
+  vTexCoord.s = theta/(2.0*pi);
+  vTexCoord.s = vTexCoord.s < 0.0 ? 1.0+vTexCoord.s:vTexCoord.s; // Shift discontinuity to spout of teapot
+  //vTexCoord.s = vTexCoord.s > 1.0 ? 1.0:vTexCoord.s;
+  vTexCoord.t = 1.8*vTexInputs.y+0.6;
+
+  vec3 illinois;
+  //illinois = vec3(textureLod(uSampler, vTexCoord,0.0)); //Forcing LOD fixes thin line discontinuity on model
+  illinois = vec3(texture(uSampler, vTexCoord)); //PROPER MIPMAP BUT ARTIFACT DUE TO DISCONTINUITY (Thin line on model)
+  //Proper solution here would be to use a model that dobles up on vertices. This is usually done in modeling
+  //software for both texture coords and model vertices and not dynamically mapped in a shader.
+  
+  //WE NEED TO BUMP MAP HERE BEFORE vNormal is used AT ALL since we will be modifying it
+  vec3 normalIn = normalize(vNormal);
+  vec3 Pt = vec3(0.0, 1.0, 0.0); // Can use up vector which is y-axis as Pt
+  vec3 Ps = normalize(cross(-normalIn, Pt));
+  vec3 sampleS = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s+(1.0/512.0), vTexCoord.t),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s-(1.0/512.0), vTexCoord.t),0.0));
+  vec3 sampleT = vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t+(1.0/512.0)),0.0)) - vec3(textureLod(uSamplerBump, vec2(vTexCoord.s, vTexCoord.t-(1.0/512.0)),0.0));
+  
   #define G_SCALE 0.5
   #define R_SCALE G_SCALE/2.0
   #define B_SCALE R_SCALE/4.0
@@ -132,7 +270,6 @@ void main() {
 `;
 
 
-
 function initwebgl() {
 
   //
@@ -152,6 +289,7 @@ function initwebgl() {
  
   teapot_vao = gl.createVertexArray();
   gl.bindVertexArray(teapot_vao);
+  
 
   // create a coordinate buffer of vertex positions and
   // connect it to the vertex shader positions
@@ -196,6 +334,45 @@ function initwebgl() {
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
                 new Uint16Array(teapot.faces),
                 gl.STATIC_DRAW);
+
+  //
+  // set up floor model VAO
+  //
+ 
+  floor_vao = gl.createVertexArray();
+  gl.bindVertexArray(floor_vao);
+  
+
+  // create a coordinate buffer of vertex positions and
+  // connect it to the vertex shader positions
+ 
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER,
+                new Float32Array(floorMod.positions),
+                gl.STATIC_DRAW);
+
+  gl.enableVertexAttribArray(vert_pos_attr);
+  gl.vertexAttribPointer(vert_pos_attr, 3, gl.FLOAT, false, 0, 0);
+
+  // create a coordinate buffer of vertex positions and
+  // connect it to the vertex shader positions
+  // but normalize the normals first
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER,
+                new Float32Array(floorMod.normals),
+                gl.STATIC_DRAW);
+
+  gl.enableVertexAttribArray(vert_normal_attr);
+  gl.vertexAttribPointer(vert_normal_attr, 3, gl.FLOAT, false, 0, 0);
+
+  // create an index buffer of triangle faces
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer()); 
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
+                new Uint16Array(floorMod.faces),
+                gl.STATIC_DRAW);
+
 
   //
   // set up texture and sampler
@@ -303,6 +480,12 @@ function loadshaders(vertexShaderSource,fragmentShaderSource) {
   gl.compileShader(vertexShader);
   if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS))
     alert("Vertex Shader Error:\n" + gl.getShaderInfoLog(vertexShader));
+	
+  var vertexShaderShadow = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vertexShaderShadow, vsSh);
+  gl.compileShader(vertexShaderShadow);
+  if (!gl.getShaderParameter(vertexShaderShadow, gl.COMPILE_STATUS))
+    alert("Vertex Shader Shadow Error:\n" + gl.getShaderInfoLog(vertexShaderShadow));
 
   //var fstextbox = document.getElementById("fragmentshader"); //This does not appear to be valid or used
 
@@ -311,17 +494,32 @@ function loadshaders(vertexShaderSource,fragmentShaderSource) {
   gl.compileShader(fragmentShader);
   if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS))
     alert("Fragment Shader Error:\n" + gl.getShaderInfoLog(fragmentShader));
+	
+  var fragmentShaderShadow = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fragmentShaderShadow, fsSh);
+  gl.compileShader(fragmentShaderShadow);
+  if (!gl.getShaderParameter(fragmentShaderShadow, gl.COMPILE_STATUS))
+    alert("Fragment Shader Shadow Error:\n" + gl.getShaderInfoLog(fragmentShaderShadow));
 
   //
   // Compile shaders and get link ID's to the attributes and uniforms
   //
 
   shaderProgram = gl.createProgram();
+  shadowShaderProgram = gl.createProgram();
+  
+  
   gl.attachShader(shaderProgram, vertexShader);
   gl.attachShader(shaderProgram, fragmentShader);
   gl.linkProgram(shaderProgram);
   if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS))
     alert("Failed to setup shaders");
+	
+  gl.attachShader(shadowShaderProgram, vertexShaderShadow);
+  gl.attachShader(shadowShaderProgram, fragmentShaderShadow);
+  gl.linkProgram(shadowShaderProgram);
+  if (!gl.getProgramParameter(shadowShaderProgram, gl.LINK_STATUS))
+    alert("Failed to setup shadow shaders");
 
   vert_pos_attr = gl.getAttribLocation(shaderProgram, "aVertexPosition");
   vert_normal_attr = gl.getAttribLocation(shaderProgram, "aVertexNormal");
@@ -332,7 +530,18 @@ function loadshaders(vertexShaderSource,fragmentShaderSource) {
   sampler2_uniform = gl.getUniformLocation(shaderProgram, "uSampler2");
   samplerBump_uniform = gl.getUniformLocation(shaderProgram, "uSamplerBump"); 
   light1_uniform = gl.getUniformLocation(shaderProgram, "vLightPos"); 
-  light2_uniform = gl.getUniformLocation(shaderProgram, "vLightPos2"); 
+  light2_uniform = gl.getUniformLocation(shaderProgram, "vLightPos2");
+  renderPotBool_uniform = gl.getUniformLocation(shaderProgram, "renderPot");
+  
+  
+  //Now again get uniforms for the shadow shader....
+  vert_pos_attrSh = gl.getAttribLocation(shadowShaderProgram, "aVertexPosition");
+  vert_normal_attrSh = gl.getAttribLocation(shadowShaderProgram, "aVertexNormal");
+  modelviewSh_uniform = gl.getUniformLocation(shadowShaderProgram, "uModelViewMatrix"); 
+  normalSh_uniform = gl.getUniformLocation(shadowShaderProgram, "uNormalMatrix"); 
+  projectionSh_uniform = gl.getUniformLocation(shadowShaderProgram, "uProjectionMatrix"); 
+  light1Sh_uniform = gl.getUniformLocation(shadowShaderProgram, "vLightPos"); 
+  light2Sh_uniform = gl.getUniformLocation(shadowShaderProgram, "vLightPos2"); 
 }
 
 //
@@ -357,6 +566,8 @@ function draw(time) {
   normalmatrix = glMatrix.mat3.create();
   glMatrix.mat3.normalFromMat4(normalmatrix,modelview);
 
+  gl.useProgram(shadowShaderProgram);
+
   gl.useProgram(shaderProgram);
 
   gl.uniformMatrix4fv(modelview_uniform, false, modelview);
@@ -364,6 +575,7 @@ function draw(time) {
   gl.uniformMatrix4fv(projection_uniform, false, projection);
   gl.uniform3fv(light1_uniform, light1_dat);
   gl.uniform3fv(light2_uniform, light2_dat);
+  gl.uniform1i(renderPotBool_uniform, true);
 
   gl.uniform1i(sampler_uniform,0);
   gl.uniform1i(sampler2_uniform,1);
@@ -383,7 +595,14 @@ function draw(time) {
                   teapot.faces.length,
                   gl.UNSIGNED_SHORT,
                   0);
-
+				  
+  gl.uniform1i(renderPotBool_uniform, false);
+  gl.bindVertexArray(floor_vao);
+  gl.drawElements(gl.TRIANGLES,
+                  floorMod.faces.length,
+                  gl.UNSIGNED_SHORT,
+                  0);
+				  
   requestAnimationFrame(draw);
 }
 
